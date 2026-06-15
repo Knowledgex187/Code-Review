@@ -1,48 +1,33 @@
 import DOMPurify from 'dompurify';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { toast } from 'react-toastify';
 import { useError } from '../../../hooks/ErrorTimeout.jsx';
 import { ngome } from '../../../utils/ngome.js';
 import { CashFlowForecastForm } from './CashFlowForm.jsx';
 
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+
+const emptyMonths = () => Object.fromEntries(MONTHS.map((m) => [m, '']));
+
+const emptyCashflow = () => ({
+    item: '',
+    ...emptyMonths(),
+});
+
+const sumRow = (row) => MONTHS.reduce((sum, m) => sum + parseFloat(row[m] || 0.0), 0);
+
 export const CashFlowForecastContainer = () => {
     const [formData, setFormData] = useState({
         template: 'cashflow_forecast',
-        totalSales: [
-            {
-                jan: '',
-                feb: '',
-                mar: '',
-                apr: '',
-                may: '',
-                jun: '',
-                jul: '',
-                aug: '',
-                sep: '',
-                oct: '',
-                nov: '',
-                dec: '',
-                totalSales: '',
-            },
-        ],
-        cashflowOut: [
-            {
-                item: '',
-                jan: '',
-                feb: '',
-                mar: '',
-                apr: '',
-                may: '',
-                jun: '',
-                jul: '',
-                aug: '',
-                sep: '',
-                oct: '',
-                nov: '',
-                dec: '',
-                totalCashflowOut: '',
-            },
-        ],
+        totalSales: emptyMonths(),
+        directCost: emptyMonths(),
+        grossProfit: emptyMonths(),
+        grossMargin: emptyMonths(),
+        cashflowOut: [emptyCashflow()],
+        staffingNiPensions: emptyMonths(),
+        expenses: emptyMonths(),
+        netMovement: emptyMonths(),
+        openingBalance: emptyMonths(),
+        closingBalance: emptyMonths(),
     });
     const [contactList, setContactList] = useState([]);
     const [loading, setLoading] = useState(false);
@@ -87,7 +72,7 @@ export const CashFlowForecastContainer = () => {
         let cleanData;
 
         if (name === 'contact') {
-            cleanData = Array.from(selectedOptions, (o) => o.value);
+            cleanData = Array.from(selectedOptions, (o) => DOMPurify.sanitize(o.value));
         } else {
             cleanData = typeof value === 'string' ? DOMPurify.sanitize(value) : value;
         }
@@ -98,32 +83,32 @@ export const CashFlowForecastContainer = () => {
         }));
     }, []);
 
-    const handleAddRow = () => {
+    const handleSectionChange = useCallback((section, month, value) => {
+        const cleanData = DOMPurify.sanitize(value);
         setFormData((prev) => ({
             ...prev,
-            cashflowOut: [
-                ...(prev.cashflowOut || []),
-                {
-                    item: '',
-                    jan: '',
-                    feb: '',
-                    mar: '',
-                    apr: '',
-                    may: '',
-                    jun: '',
-                    jul: '',
-                    aug: '',
-                    sep: '',
-                    oct: '',
-                    nov: '',
-                    dec: '',
-                    totalCashflowOut: '',
-                },
-            ],
+            [section]: { ...prev[section], [month]: cleanData },
         }));
-    };
+    }, []);
 
-    const handleDeleteRow = (index) => {
+    const handleRowChange = useCallback((index, field, value) => {
+        const cleanData = DOMPurify.sanitize(value);
+        setFormData((prev) => {
+            const rows = [...prev.cashflowOut];
+            rows[index] = { ...rows[index], [field]: cleanData };
+
+            return { ...prev, cashflowOut: rows };
+        });
+    }, []);
+
+    const handleAddRow = useCallback(() => {
+        setFormData((prev) => ({
+            ...prev,
+            cashflowOut: [...prev.cashflowOut, emptyCashflow()],
+        }));
+    }, []);
+
+    const handleDeleteRow = useCallback((index) => {
         setFormData((prev) => {
             const rows = prev.cashflowOut || [];
             if (rows.length === 1) return prev;
@@ -131,99 +116,78 @@ export const CashFlowForecastContainer = () => {
 
             return { ...prev, cashflowOut: filtered };
         });
-    };
+    }, []);
 
-    const handleTotalSalesRowChange = (index, field, value) => {
-        setFormData((prev) => {
-            const rows = prev.totalSales || [];
-            const updated = [...rows];
-            if (!updated[index])
-                updated[index] = {
-                    jan: '',
-                    feb: '',
-                    mar: '',
-                    apr: '',
-                    may: '',
-                    jun: '',
-                    jul: '',
-                    aug: '',
-                    sep: '',
-                    oct: '',
-                    nov: '',
-                    dec: '',
-                    totalSales: '',
-                };
-
-            updated[index][field] = value;
-
-            return { ...prev, totalSales: updated };
+    // Vertical (column-wise) totals across all cashflowOut rows, per month
+    const cashflowOutTotals = useMemo(() => {
+        const totals = emptyMonths();
+        formData.cashflowOut.forEach((row) => {
+            MONTHS.forEach((m) => {
+                totals[m] = (totals[m] || 0) + (parseFloat(row[m]) || 0);
+            });
         });
-    };
+        return totals;
+    }, [formData.cashflowOut]);
 
-    const handleCashflowOutRowChange = (index, field, value) => {
-        setFormData((prev) => {
-            const rows = prev.cashflowOut || [];
-            const updated = [...rows];
-            if (!updated[index])
-                updated[index] = {
-                    item: '',
-                    jan: '',
-                    feb: '',
-                    mar: '',
-                    apr: '',
-                    may: '',
-                    jun: '',
-                    jul: '',
-                    aug: '',
-                    sep: '',
-                    oct: '',
-                    nov: '',
-                    dec: '',
-                    totalCashflowOut: '',
-                };
+    const totalSalesSum = useMemo(() => sumRow(formData.totalSales), [formData.totalSales]);
 
-            updated[index][field] = value;
+    const totalDirectCost = useMemo(() => sumRow(formData.directCost), [formData.directCost]);
 
-            return { ...prev, cashflowOut: updated };
-        });
-    };
+    const totalGrossProfit = useMemo(() => sumRow(formData.grossProfit), [formData.grossProfit]);
 
-    const totalSales = useMemo(() => {
-        const rows = formData.totalSales || [];
-        return rows.reduce((sum, row) => {
-            return sum + (parseFloat(row.value) || 0.0);
-        }, 0);
-    }, [formData.totalSales]);
+    const totalStaffingNiPensions = useMemo(
+        () => sumRow(formData.staffingNiPensions),
+        [formData.staffingNiPensions],
+    );
 
-    const handleSubmission = async () => {
-        setLoading(true);
-        setErrorTimeout(null);
+    const totalExpenses = useMemo(() => sumRow(formData.expenses), [formData.expenses]);
 
-        if (!formData.contact) {
-            toast.error('At least one contact must be selected.');
-            setErrorTimeout('At least one contact must be selected.');
-            setLoading(false);
-            return { success: false, error: error };
-        }
+    const totalNetMovement = useMemo(() => sumRow(formData.netMovement), [formData.netMovement]);
 
-        try {
-            const response = await ngome.post('/documents/generate/', formData);
+    const totalOpeningBalances = useMemo(
+        () => sumRow(formData.openingBalance),
+        [formData.openingBalance],
+    );
 
-            return { success: true, data: response.data };
-        } catch (error) {
-            const errorData = error?.response?.data;
-            const errorMsg =
-                errorData?.detail ||
-                errorData?.message ||
-                error.message ||
-                (typeof errorData === 'string' ? errorData : JSON.stringify(errorData));
-            setErrorTimeout(errorMsg);
+    const totalClosingBalances = useMemo(
+        () => sumRow(formData.closingBalance),
+        [formData.closingBalance],
+    );
 
-            return { success: false, error: errorMsg };
-        } finally {
-            setLoading(false);
-        }
-    };
+    const totalGrossMargin = useMemo(() => sumRow(formData.grossMargin), [formData.grossMargin]);
+
+    const handleSubmission = useCallback(
+        async (e) => {
+            e.preventDefault();
+            setLoading(true);
+            setErrorTimeout(null);
+
+            if (!formData.contact) {
+                setErrorTimeout('At least one contact must be selected.');
+                setLoading(false);
+                return { success: false, error: error };
+            }
+
+            try {
+                const response = await ngome.post('/documents/generate/', formData);
+
+                return { success: true, data: response.data };
+            } catch (error) {
+                const errorData = error?.response?.data;
+                const errorMsg =
+                    errorData?.detail ||
+                    errorData?.message ||
+                    error.message ||
+                    (typeof errorData === 'string' ? errorData : JSON.stringify(errorData));
+                setErrorTimeout(errorMsg);
+
+                return { success: false, error: errorMsg };
+            } finally {
+                setLoading(false);
+            }
+        },
+        [formData, error, setErrorTimeout],
+    );
 
     return (
         <>
@@ -233,12 +197,22 @@ export const CashFlowForecastContainer = () => {
                 formData={formData}
                 addRow={handleAddRow}
                 deleteRow={handleDeleteRow}
-                rowChange={handleTotalSalesRowChange}
-                rowChangeCashflow={handleCashflowOutRowChange}
+                rowChange={handleRowChange}
                 contactList={contactList}
                 inputChange={handleInput}
                 onSubmit={handleSubmission}
-                totalSales={totalSales}
+                totalSalesSum={totalSalesSum}
+                cashflowOutTotals={cashflowOutTotals}
+                totalDirectCost={totalDirectCost}
+                totalGrossProfit={totalGrossProfit}
+                totalStaffingNiPensions={totalStaffingNiPensions}
+                totalExpenses={totalExpenses}
+                totalNetMovement={totalNetMovement}
+                totalOpeningBalances={totalOpeningBalances}
+                totalClosingBalances={totalClosingBalances}
+                totalGrossMargin={totalGrossMargin}
+                onSectionChange={handleSectionChange}
+                sumRow={sumRow}
             />
         </>
     );
